@@ -4,9 +4,61 @@ import pprint
 import logging
 from logging_config import setup_logging
 from debug_config import *
+import openpyxl
 
 
-def read_table_by_header_df(df_whole, required_headers):
+def get_non_red_rows(excel_filename, sheet_name, header_row_idx, nrows):
+    """
+    Возвращает список индексов (относительно DataFrame!) строк, в которых НЕТ красного цвета ни в шрифте, ни в заливке.
+    header_row_idx — строка с заголовками (индекс в openpyxl, начинается с 1).
+    nrows — сколько строк читать (длина DataFrame после header).
+    """
+    wb = openpyxl.load_workbook(excel_filename, data_only=True)
+    ws = wb[sheet_name]
+    result = []
+    for ex_idx in range(header_row_idx+1, header_row_idx+1+nrows):
+        is_red = False
+        for cell in ws[ex_idx]:
+            # Проверяем заливку
+            fill = cell.fill
+            fgColor = getattr(fill, 'fgColor', None)
+            color_str = ""
+            try:
+                if fgColor is not None:
+                    if hasattr(fgColor, 'rgb') and isinstance(fgColor.rgb, str):
+                        color_str = fgColor.rgb
+                    elif hasattr(fgColor, 'rgb') and fgColor.rgb is not None:
+                        color_str = str(fgColor.rgb)
+                if color_str and color_str.upper() == 'FFFF0000':
+                    is_red = True
+            except Exception:
+                pass
+            # Проверяем шрифт
+            font_color = getattr(cell.font, 'color', None)
+            font_color_str = ""
+            try:
+                if font_color is not None:
+                    if hasattr(font_color, 'rgb') and isinstance(font_color.rgb, str):
+                        font_color_str = font_color.rgb
+                    elif hasattr(font_color, 'rgb') and font_color.rgb is not None:
+                        font_color_str = str(font_color.rgb)
+                if font_color_str and font_color_str.upper() == 'FFFF0000':
+                    is_red = True
+            except Exception:
+                pass
+            if is_red:
+                break
+        if not is_red:
+            # индекс относительно DataFrame
+            result.append(ex_idx - (header_row_idx+1))
+    return result
+
+
+def read_table_by_header_df(excel_filename, sheet_name, required_headers):
+    # 1. чтение листа
+    df_whole = pd.read_excel(
+        excel_filename, sheet_name=sheet_name, header=None)
+    # 2. поиск строки шапки
     found = False
     header_row = None
     for idx, row in df_whole.iterrows():
@@ -14,19 +66,22 @@ def read_table_by_header_df(df_whole, required_headers):
         if set(required_headers).issubset(set(headers)):
             found = True
             header_row = idx
-            logging.info(
-                f"Заголовок найден в строке {header_row+1}: {headers}")
             break
     if not found:
-        logging.error(f"Не найден заголовок с колонками {required_headers}")
-        raise Exception(f"Не найден заголовок с колонками {required_headers}")
+        raise Exception(
+            f"Не найден заголовок с колонками {required_headers} на листе {sheet_name}")
+    # 3. обработка DataFrame
     df_table = df_whole.iloc[header_row:]
     df_table.columns = df_table.iloc[0]
     df_table = df_table[1:]
     df_table = df_table.reset_index(drop=True)
     cols = [col for col in required_headers if col in df_table.columns]
     df_out = df_table[cols]
-    logging.info(f"Обработано {len(df_out)} строк с колонками {cols}")
+
+    # 4. фильтрация по красному цвету
+    clean_rows = get_non_red_rows(
+        excel_filename, sheet_name, header_row+1, len(df_out))
+    df_out = df_out.iloc[clean_rows].reset_index(drop=True)
     return df_out
 
 
@@ -35,15 +90,11 @@ def build_structure_from_excel(filename):
     try:
         logging.info(f"Открытие файла Excel: {filename}")
         with pd.ExcelFile(filename) as xls:
-            cats_whole = pd.read_excel(
-                xls, sheet_name='Категории событий', header=None)
-            expr_whole = pd.read_excel(
-                xls, sheet_name='Ключевые выражения категорий', header=None)
             logging.info(f"Файл {filename} успешно открыт.")
-            cats_df = read_table_by_header_df(
-                cats_whole, {'Тип категории', 'Категория'})
-            expr_df = read_table_by_header_df(
-                expr_whole, {'Категория события', 'Ключевое выражение'})
+            cats_df = read_table_by_header_df(filename, 'Категории событий', {
+                                              'Тип категории', 'Категория'})
+            expr_df = read_table_by_header_df(filename, 'Ключевые выражения категорий', {
+                                              'Категория события', 'Ключевое выражение'})
         logging.info(f"Файл {filename} закрыт.")
     except Exception as e:
         logging.error(f"Ошибка при открытии файла {filename}: {e}")
@@ -93,16 +144,12 @@ if __name__ == "__main__":
     try:
         logging.info(f"Открытие файла Excel: {filename}")
         with pd.ExcelFile(filename) as xls:
-            cats_whole = pd.read_excel(
-                xls, sheet_name='Категории событий', header=None)
-            expr_whole = pd.read_excel(
-                xls, sheet_name='Ключевые выражения категорий', header=None)
             logging.info(f"Файл {filename} успешно открыт.")
-            cats_df = read_table_by_header_df(
-                cats_whole, {'Тип категории', 'Категория'})
+            cats_df = read_table_by_header_df(filename, 'Категории событий', {
+                                              'Тип категории', 'Категория'})
             cats_df['Тип категории'] = cats_df['Тип категории'].ffill()
-            expr_df = read_table_by_header_df(
-                expr_whole, {'Категория события', 'Ключевое выражение'})
+            expr_df = read_table_by_header_df(filename, 'Ключевые выражения категорий', {
+                                              'Категория события', 'Ключевое выражение'})
         logging.info(f"Файл {filename} закрыт.")
         print("\n--- DataFrame: Категории событий ---")
         print(cats_df)
