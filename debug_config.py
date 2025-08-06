@@ -1,0 +1,2 @@
+DEBUG_PARENT_UID = '0377FACB-0EA4-4990-A4DD-DC9DE6BFB5B4'
+DEBUG_FILE_NAME = "Опросный лист ОЖ. Станции.xlsx"
