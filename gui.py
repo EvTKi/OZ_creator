@@ -3,29 +3,32 @@
 GUI-приложение для генератора CIM/XML из Excel.
 Использует PyQt5 для создания интерфейса.
 """
-
 import sys
 import os
 import logging
 from datetime import datetime
 from pathlib import Path
+import pandas as pd  # Для получения списка листов
 
 # Импорты PyQt5
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QPushButton, QLineEdit, QTextEdit, QFileDialog, QLabel, QMessageBox, QProgressBar
+    QPushButton, QLineEdit, QTextEdit, QFileDialog, QLabel, QMessageBox, QProgressBar,
+    QComboBox  # <-- Добавлено
 )
 from PyQt5.QtCore import QThread, pyqtSignal, QObject, Qt
 
 # Импорты из вашего проекта
 # Предполагается, что config.py, logging_config.py, xlsx_parser.py, cim_xml_creator.py находятся рядом
-from config import DEBUG_FILE_NAME, DEBUG_PARENT_UID, LOG_DIR
+# <-- Добавлен импорт констант
+from config import DEBUG_FILE_NAME, DEBUG_PARENT_UID, LOG_DIR, SHEET_CATEGORIES, SHEET_TEMPLATES
 from logging_config import LogManager
 from xlsx_parser import ExcelParser
 from cim_xml_creator import CIMXMLGenerator
 
-
 # --- 1. Кастомный лог-хендлер для перенаправления логов в GUI ---
+
+
 class QtHandler(QObject, logging.Handler):
     """
     Пользовательский обработчик логов, который отправляет сообщения в Qt сигнал.
@@ -43,8 +46,9 @@ class QtHandler(QObject, logging.Handler):
         msg = self.format(record)
         self.new_record.emit(msg)
 
-
 # --- 2. Рабочий поток для выполнения основной логики ---
+
+
 class WorkerThread(QThread):
     """
     Поток для выполнения длительных операций (парсинг, генерация XML),
@@ -55,10 +59,16 @@ class WorkerThread(QThread):
     error = pyqtSignal(str)     # Ошибка, передаем сообщение об ошибке
     progress = pyqtSignal(str)  # Прогресс/информация, передаем сообщение
 
-    def __init__(self, excel_file_path, parent_uid):
+    # --- Изменения в __init__ ---
+    # Добавлены параметры sheet_categories_name и sheet_templates_name
+    def __init__(self, excel_file_path, parent_uid, sheet_categories_name, sheet_templates_name):
         super().__init__()
         self.excel_file_path = excel_file_path
         self.parent_uid = parent_uid
+        # --- Новые атрибуты ---
+        self.sheet_categories_name = sheet_categories_name
+        self.sheet_templates_name = sheet_templates_name
+        # -----------------------
 
     def run(self):
         """
@@ -71,11 +81,18 @@ class WorkerThread(QThread):
             logger = logger_manager.get_logger("WorkerThread")
             logger.info("Начало обработки...")
 
-            # 2. Парсинг Excel
+            # --- Изменения в передаче параметров ---
+            # Передаем имена листов в ExcelParser
             self.progress.emit("Начало парсинга Excel-файла...")
-            parser = ExcelParser(self.excel_file_path, logger_manager)
+            # parser = ExcelParser(self.excel_file_path, logger_manager) # Было
+            parser = ExcelParser(
+                self.excel_file_path, logger_manager,
+                override_sheet_categories=self.sheet_categories_name,  # <-- Новое
+                override_sheet_templates=self.sheet_templates_name    # <-- Новое
+            )  # Стало
             structure = parser.build_structure()
             logger.info("Парсинг Excel-файла завершен.")
+            # -------------------------------------
 
             # 3. Генерация XML
             self.progress.emit("Начало генерации CIM/XML...")
@@ -87,19 +104,15 @@ class WorkerThread(QThread):
             # 4. Запись в файл
             base = os.path.splitext(os.path.basename(self.excel_file_path))[0]
             out_xml_path = f'{base}.xml'
-
             # Если .exe, сохраняем рядом с ним, иначе в текущей директории
             if getattr(sys, 'frozen', False):
                 out_xml_path = os.path.join(
                     os.path.dirname(sys.executable), out_xml_path)
-
             with open(out_xml_path, 'w', encoding='utf-8') as f:
                 f.write(xml_content)
             logger.info(f"XML успешно сохранён: {out_xml_path}")
-
             # Отправляем сигнал об успешном завершении с путем к файлу
             self.finished.emit(out_xml_path)
-
         except Exception as e:
             # Отправляем сигнал об ошибке
             error_msg = f"Ошибка во время выполнения: {str(e)}"
@@ -107,8 +120,9 @@ class WorkerThread(QThread):
             logger.error(error_msg, exc_info=True)
             self.error.emit(error_msg)
 
-
 # --- 3. Главное окно приложения ---
+
+
 class MainWindow(QMainWindow):
     """
     Главное окно GUI-приложения.
@@ -118,13 +132,18 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.worker_thread = None
         self.log_handler = None
+        # --- Новые атрибуты для ComboBox ---
+        self.categories_sheet_combo = None
+        self.templates_sheet_combo = None
+        # ----------------------------------
         self.init_ui()
         self.setup_logging()
 
     def init_ui(self):
         """Инициализация пользовательского интерфейса."""
         self.setWindowTitle("Генератор CIM/XML из Excel")
-        self.setGeometry(100, 100, 800, 600)
+        # Увеличил высоту для новых элементов
+        self.setGeometry(100, 100, 800, 650)
 
         # --- Центральный виджет ---
         central_widget = QWidget()
@@ -146,6 +165,27 @@ class MainWindow(QMainWindow):
         file_layout.addWidget(self.file_path_edit)
         file_layout.addWidget(self.browse_button)
         form_layout.addRow(QLabel("Файл Excel:"), file_layout)
+
+        # --- Новые ComboBox для выбора листов ---
+        # Выбор листа категорий
+        self.categories_sheet_combo = QComboBox()
+        self.categories_sheet_combo.setEditable(
+            True)  # Позволяет вводить текст вручную
+        # Значение по умолчанию из config
+        self.categories_sheet_combo.addItem(SHEET_CATEGORIES)
+        # self.categories_sheet_combo.setCurrentText(SHEET_CATEGORIES) # Устанавливается выше
+        form_layout.addRow(QLabel("Лист категорий:"),
+                           self.categories_sheet_combo)
+
+        # Выбор листа шаблонов
+        self.templates_sheet_combo = QComboBox()
+        self.templates_sheet_combo.setEditable(True)
+        # Значение по умолчанию из config
+        self.templates_sheet_combo.addItem(SHEET_TEMPLATES)
+        # self.templates_sheet_combo.setCurrentText(SHEET_TEMPLATES) # Устанавливается выше
+        form_layout.addRow(QLabel("Лист шаблонов:"),
+                           self.templates_sheet_combo)
+        # ---------------------------------------
 
         # Поле для Parent UID
         self.uid_edit = QLineEdit()
@@ -199,10 +239,8 @@ class MainWindow(QMainWindow):
         # Устанавливаем формат логов (без даты/времени, так как оно будет в текстовом поле)
         formatter = logging.Formatter('[%(levelname)s] %(message)s')
         self.log_handler.setFormatter(formatter)
-
         # Подключаем сигнал хендлера к слоту обновления текста
         self.log_handler.new_record.connect(self.append_log)
-
         # Добавляем хендлер к корневому логгеру
         root_logger = logging.getLogger()
         root_logger.addHandler(self.log_handler)
@@ -228,19 +266,86 @@ class MainWindow(QMainWindow):
         if file_path:
             self.file_path_edit.setText(file_path)
 
+            # --- Новое: Загрузка списка листов при выборе файла ---
+            self.load_sheet_names(file_path)
+            # ----------------------------------------------------
+
+    # --- Новый метод для загрузки имен листов ---
+    def load_sheet_names(self, file_path):
+        """
+        Загружает список имен листов из Excel-файла и заполняет ComboBox.
+        """
+        try:
+            # Используем pandas для получения списка листов
+            # Это быстрее и проще, чем openpyxl для этой задачи
+            with pd.ExcelFile(file_path) as xls:
+                sheet_names = xls.sheet_names
+
+            if sheet_names:
+                # Сохраняем текущий текст, если он есть и валиден
+                current_cat_text = self.categories_sheet_combo.currentText()
+                current_tmpl_text = self.templates_sheet_combo.currentText()
+
+                # Очищаем и заполняем ComboBox
+                self.categories_sheet_combo.clear()
+                self.templates_sheet_combo.clear()
+                self.categories_sheet_combo.addItems(sheet_names)
+                self.templates_sheet_combo.addItems(sheet_names)
+
+                # Пытаемся восстановить предыдущий выбор или использовать значения по умолчанию
+                if current_cat_text in sheet_names:
+                    self.categories_sheet_combo.setCurrentText(
+                        current_cat_text)
+                elif SHEET_CATEGORIES in sheet_names:  # Если дефолтное значение есть
+                    self.categories_sheet_combo.setCurrentText(
+                        SHEET_CATEGORIES)
+                else:
+                    self.categories_sheet_combo.setCurrentIndex(
+                        0)  # Иначе первый доступный
+
+                if current_tmpl_text in sheet_names:
+                    self.templates_sheet_combo.setCurrentText(
+                        current_tmpl_text)
+                elif SHEET_TEMPLATES in sheet_names:
+                    self.templates_sheet_combo.setCurrentText(SHEET_TEMPLATES)
+                else:
+                    self.templates_sheet_combo.setCurrentIndex(0)
+
+                self.append_log(f"Список листов загружен: {sheet_names}")
+            else:
+                self.append_log("Предупреждение: В файле не найдено листов.")
+        except Exception as e:
+            error_msg = f"Ошибка при загрузке списка листов: {e}"
+            self.append_log(error_msg)
+            # Можно также показать QMessageBox.warning(self, "Ошибка", error_msg)
+    # ------------------------------------------
+
     def start_processing(self):
         """Запускает процесс обработки в отдельном потоке."""
         excel_file = self.file_path_edit.text().strip()
         parent_uid = self.uid_edit.text().strip()
 
+        # --- Получение значений из ComboBox ---
+        sheet_categories_name = self.categories_sheet_combo.currentText().strip()
+        sheet_templates_name = self.templates_sheet_combo.currentText().strip()
+        # -------------------------------------
+
         if not excel_file:
             QMessageBox.warning(self, "Ошибка ввода",
                                 "Пожалуйста, выберите Excel-файл.")
             return
-
         if not os.path.exists(excel_file):
             QMessageBox.critical(self, "Ошибка файла",
                                  f"Файл не найден: {excel_file}")
+            return
+        # Проверка на пустые имена листов
+        if not sheet_categories_name:
+            QMessageBox.warning(self, "Ошибка ввода",
+                                "Пожалуйста, введите или выберите имя листа категорий.")
+            return
+        if not sheet_templates_name:
+            QMessageBox.warning(self, "Ошибка ввода",
+                                "Пожалуйста, введите или выберите имя листа шаблонов.")
             return
 
         # if not parent_uid: # UID может быть опциональным, если используется дефолтный
@@ -254,9 +359,13 @@ class MainWindow(QMainWindow):
         self.open_xml_button.setEnabled(False)
         self.output_xml_path = None
 
-        # Создаем и запускаем рабочий поток
+        # --- Передача имен листов в WorkerThread ---
         self.worker_thread = WorkerThread(
-            excel_file, parent_uid if parent_uid else None)
+            excel_file, parent_uid if parent_uid else None,
+            sheet_categories_name, sheet_templates_name  # <-- Новые аргументы
+        )
+        # -------------------------------------------
+
         self.worker_thread.finished.connect(self.on_worker_finished)
         self.worker_thread.error.connect(self.on_worker_error)
         # Прямая передача сообщений прогресса в лог
@@ -310,10 +419,8 @@ class MainWindow(QMainWindow):
             if getattr(sys, 'frozen', False):
                 log_path = os.path.join(
                     os.path.dirname(sys.executable), LOG_DIR)
-
             if not os.path.exists(log_path):
                 os.makedirs(log_path)  # Создаем, если не существует
-
             if sys.platform == "win32":
                 os.startfile(log_path)
             elif sys.platform == "darwin":  # macOS
@@ -324,92 +431,81 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Ошибка", f"Не удалось открыть папку логов:\n{e}")
 
-        def closeEvent(self, event):
-            """
-            Переопределяем событие закрытия окна для корректного завершения потока
-            и безопасной очистки лог-хендлера до завершения Qt.
-            """
-            import logging  # Убедимся, что logging импортирован
-# --- 1. Завершение рабочего потока (если он есть и запущен) ---
-            if self.worker_thread is not None:
-                try:
-                    # Проверим, запущен ли поток. Если объект удален, это вызовет RuntimeError
-                    is_running = self.worker_thread.isRunning()
-                except RuntimeError:
-                    # Объект уже удален, ничего делать не нужно
-                    is_running = False
-                    # Явно устанавливаем ссылку в None после ошибки
-                    self.worker_thread = None
-
-                # --- ВАЖНО: Повторная проверка перед использованием ---
-                # Pylance может ругаться, если не видит прямой связи между проверкой и использованием
-                # Явная проверка устраняет это.
-                if is_running and self.worker_thread is not None:  # <-- Добавлена повторная проверка
-                    self.append_log(
-                        "Приложение закрывается, ожидание завершения потока...")
-
-                    # Еще одна проверка непосредственно перед вызовом
-                    worker = self.worker_thread  # Создаем временную ссылку
-                    if worker is not None:  # <-- Убеждаемся, что worker не None
-                        worker.quit()  # Просим поток завершиться
-
-                        # Ждем завершения, но не бесконечно (например, 2 секунды)
-                        # Используем QThread.wait(), а не просто time.sleep
-                        # <-- worker гарантированно не None здесь
-                        if not worker.wait(2000):
-                            self.append_log("Поток не завершился вовремя.")
-
-                    # Очищаем ссылку
-                    self.worker_thread = None
-                elif self.worker_thread is not None:
-                    # Поток существует, но не запущен, просто очищаем ссылку
-                    self.worker_thread = None
-
-                    # --- 2. КРИТИЧЕСКИ ВАЖНО: Безопасное и раннее удаление лог-хендлера ---
-                    # Делаем это ДО завершения работы Qt, чтобы избежать ошибки в logging.shutdown()
-                    if self.log_handler:
-                        root_logger = logging.getLogger()
-
-                        # ВАЖНО: Удаляем хендлер из логгера ПЕРВЫМ ДЕЛОМ
-                        try:
-                            # Пытаемся удалить хендлер из корневого логгера
-                            # Это должно произойти до того, как Qt уничтожит объект C++ self.log_handler
-                            root_logger.removeHandler(self.log_handler)
-                            # Для отладки
-                            self.append_log(
-                                "Лог-хендлер успешно отсоединен от корневого логгера.")
-                        except (ValueError, RuntimeError) as e:
-                            # ValueError: если хендлера уже нет в списке (редко, но возможно)
-                            # RuntimeError: если объект Python/Qt уже удален (наш случай)
-                            # В любом случае, мы больше не хотим, чтобы этот хендлер был в списке.
-                            pass  # Игнорируем ошибки, так как наша цель - убрать его из списка
-
-                        # --- 3. Очистка сигналов хендлера (опционально, но хорошо) ---
-                        try:
-                            # Отсоединяем все сигналы хендлера, чтобы избежать ошибок при его удалении
-                            # Это предотвращает попытки Qt отправить сигнал уже уничтоженному слоту
-                            if hasattr(self.log_handler, 'new_record'):
-                                self.log_handler.new_record.disconnect()  # Отсоединяем все подключения сигнала
-                        except (RuntimeError, TypeError):
-                            # RuntimeError: если объект Qt уже удален
-                            # TypeError: если сигнал не был подключен или объект удален
-                            pass  # Игнорируем ошибки
-
-                        # --- 4. Явное обнуление ссылки на хендлер ---
-                        # Это помогает Python понять, что объект больше не нужен
-                        self.log_handler = None
-
-                    # Принимаем событие закрытия, позволяя Qt завершить работу
-                    event.accept()
+    def closeEvent(self, event):
+        """
+        Переопределяем событие закрытия окна для корректного завершения потока
+        и безопасной очистки лог-хендлера до завершения Qt.
+        """
+        import logging  # Убедимся, что logging импортирован
+        # --- 1. Завершение рабочего потока (если он есть и запущен) ---
+        if self.worker_thread is not None:
+            try:
+                # Проверим, запущен ли поток. Если объект удален, это вызовет RuntimeError
+                is_running = self.worker_thread.isRunning()
+            except RuntimeError:
+                # Объект уже удален, ничего делать не нужно
+                is_running = False
+                # Явно устанавливаем ссылку в None после ошибки
+                self.worker_thread = None
+            # --- ВАЖНО: Повторная проверка перед использованием ---
+            # Pylance может ругаться, если не видит прямой связи между проверкой и использованием
+            # Явная проверка устраняет это.
+            if is_running and self.worker_thread is not None:  # <-- Добавлена повторная проверка
+                self.append_log(
+                    "Приложение закрывается, ожидание завершения потока...")
+                # Еще одна проверка непосредственно перед вызовом
+                worker = self.worker_thread  # Создаем временную ссылку
+                if worker is not None:  # <-- Убеждаемся, что worker не None
+                    worker.quit()  # Просим поток завершиться
+                    # Ждем завершения, но не бесконечно (например, 2 секунды)
+                    # Используем QThread.wait(), а не просто time.sleep
+                    # <-- worker гарантированно не None здесь
+                    if not worker.wait(2000):
+                        self.append_log("Поток не завершился вовремя.")
+                # Очищаем ссылку
+                self.worker_thread = None
+            elif self.worker_thread is not None:
+                # Поток существует, но не запущен, просто очищаем ссылку
+                self.worker_thread = None
+        # --- 2. КРИТИЧЕСКИ ВАЖНО: Безопасное и раннее удаление лог-хендлера ---
+        # Делаем это ДО завершения работы Qt, чтобы избежать ошибки в logging.shutdown()
+        if self.log_handler:
+            root_logger = logging.getLogger()
+            # ВАЖНО: Удаляем хендлер из логгера ПЕРВЫМ ДЕЛОМ
+            try:
+                # Пытаемся удалить хендлер из корневого логгера
+                # Это должно произойти до того, как Qt уничтожит объект C++ self.log_handler
+                root_logger.removeHandler(self.log_handler)
+                # Для отладки
+                self.append_log(
+                    "Лог-хендлер успешно отсоединен от корневого логгера.")
+            except (ValueError, RuntimeError) as e:
+                # ValueError: если хендлера уже нет в списке (редко, но возможно)
+                # RuntimeError: если объект Python/Qt уже удален (наш случай)
+                # В любом случае, мы больше не хотим, чтобы этот хендлер был в списке.
+                pass  # Игнорируем ошибки, так как наша цель - убрать его из списка
+            # --- 3. Очистка сигналов хендлера (опционально, но хорошо) ---
+            try:
+                # Отсоединяем все сигналы хендлера, чтобы избежать ошибок при его удалении
+                # Это предотвращает попытки Qt отправить сигнал уже уничтоженному слоту
+                if hasattr(self.log_handler, 'new_record'):
+                    self.log_handler.new_record.disconnect()  # Отсоединяем все подключения сигнала
+            except (RuntimeError, TypeError):
+                # RuntimeError: если объект Qt уже удален
+                # TypeError: если сигнал не был подключен или объект удален
+                pass  # Игнорируем ошибки
+            # --- 4. Явное обнуление ссылки на хендлер ---
+            # Это помогает Python понять, что объект больше не нужен
+            self.log_handler = None
+        # Принимаем событие закрытия, позволяя Qt завершить работу
+        event.accept()
 
 
 # --- 4. Точка входа ---
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
     # Устанавливаем Fusion стиль для лучшего внешнего вида (опционально)
     app.setStyle('Fusion')
-
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())

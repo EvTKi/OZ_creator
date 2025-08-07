@@ -2,7 +2,6 @@
 """
 Модуль для парсинга структуры категорий из Excel-файла.
 """
-
 import pandas as pd
 from collections import defaultdict
 import logging
@@ -13,7 +12,7 @@ from openpyxl.styles.colors import Color
 from config import (
     RED_LIKE_COLORS, RED_INDEXED_COLORS, RED_THEME_INDICES,
     RED_THEME_TINT_THRESHOLD, DEFAULT_STORAGE_DEPTH,
-    SHEET_CATEGORIES, SHEET_TEMPLATES,
+    SHEET_CATEGORIES, SHEET_TEMPLATES,  # <-- Импортируем константы листов
     COL_CATEGORY_TYPE, COL_CATEGORY,
     COL_TEMPLATE_CATEGORY, COL_TEMPLATE_EXPRESSION
 )
@@ -25,25 +24,30 @@ class ExcelParser:
     Класс для парсинга структуры категорий из Excel-файла.
     """
 
-    def __init__(self, filename: str, logger_manager: LogManager):
+    def __init__(self, filename: str, logger_manager: LogManager,
+                 override_sheet_categories: str = None,
+                 override_sheet_templates: str = None):  # <-- Добавлены параметры
         """
         Инициализирует парсер Excel.
-
         Args:
             filename (str): Путь к Excel-файлу.
             logger_manager (LogManager): Менеджер логирования.
+            override_sheet_categories (str, optional): Переопределяет имя листа категорий.
+            override_sheet_templates (str, optional): Переопределяет имя листа шаблонов.
         """
         self.filename = filename
         self.logger = logger_manager.get_logger(self.__class__.__name__)
         self._logger_manager = logger_manager
+        # --- Новые атрибуты для переопределения ---
+        self._override_sheet_categories = override_sheet_categories
+        self._override_sheet_templates = override_sheet_templates
+        # -------------------------------------------
 
     def _is_red_color(self, color: Optional[Color]) -> bool:
         """
         Проверяет, является ли цвет (Font.color или Fill.fgColor) красным.
-
         Args:
             color (Optional[Color]): Цвет для проверки.
-
         Returns:
             bool: True, если цвет считается красным, иначе False.
         """
@@ -80,7 +84,6 @@ class ExcelParser:
                         return True
         except Exception as e:
             self.logger.debug(f"Ошибка при обработке RGB цвета {color}: {e}")
-
         # 2. Theme color
         try:
             if hasattr(color, 'theme') and color.theme is not None:
@@ -90,7 +93,6 @@ class ExcelParser:
                         return True
         except Exception as e:
             self.logger.debug(f"Ошибка при обработке theme цвета {color}: {e}")
-
         # 3. Indexed color
         try:
             if hasattr(color, 'indexed'):
@@ -99,25 +101,21 @@ class ExcelParser:
         except Exception as e:
             self.logger.debug(
                 f"Ошибка при обработке indexed цвета {color}: {e}")
-
         return False
 
     def _get_non_red_rows(self, sheet_name: str, header_row_idx: int, nrows: int) -> List[int]:
         """
         Возвращает индексы строк (относительно DataFrame), в которых отсутствует красный цвет 
         в заливке ячеек или цвете шрифта.
-
         Args:
             sheet_name (str): Имя листа.
             header_row_idx (int): Номер строки заголовка в Excel (индексация с 1).
             nrows (int): Количество строк для анализа.
-
         Returns:
             List[int]: Список индексов строк (в индексации pandas), без красного цвета.
         """
         self.logger.debug(f"Начало фильтрации строк по цвету для листа '{sheet_name}', "
                           f"строки {header_row_idx + 1}-{header_row_idx + nrows}")
-
         try:
             # data_only=True для получения значений, а не формул
             wb = openpyxl.load_workbook(self.filename, data_only=True)
@@ -131,7 +129,6 @@ class ExcelParser:
             self.logger.error(
                 f"Ошибка при загрузке файла '{self.filename}' для анализа цвета: {e}")
             raise
-
         try:
             ws = wb[sheet_name]
             self.logger.debug(f"Лист '{sheet_name}' открыт для анализа цвета.")
@@ -143,10 +140,8 @@ class ExcelParser:
             self.logger.error(
                 f"Ошибка при открытии листа '{sheet_name}' для анализа цвета: {e}")
             raise
-
         result = []
         red_count = 0
-
         for ex_idx in range(header_row_idx + 1, header_row_idx + 1 + nrows):
             is_red = False
             try:
@@ -170,13 +165,11 @@ class ExcelParser:
                 self.logger.warning(
                     f"Ошибка при анализе строки {ex_idx} на листе '{sheet_name}': {e}")
                 # Не прерываем весь процесс из-за ошибки в одной строке, продолжаем анализ
-
             if not is_red:
                 df_index = ex_idx - (header_row_idx + 1)
                 result.append(df_index)
             else:
                 red_count += 1
-
         self.logger.info(f"Фильтрация по цвету завершена для листа '{sheet_name}'. "
                          f"Проанализировано: {nrows}, Пропущено (красных): {red_count}, Оставлено: {len(result)}")
         return result
@@ -184,19 +177,15 @@ class ExcelParser:
     def _read_table_by_header_df(self, sheet_name: str, required_headers: Set[str]) -> pd.DataFrame:
         """
         Читает таблицу из Excel-листа, начиная со строки заголовка.
-
         Args:
             sheet_name (str): Имя листа Excel.
             required_headers (Set[str]): Множество обязательных заголовков столбцов.
-
         Returns:
             pd.DataFrame: DataFrame с данными таблицы, отфильтрованный по цвету.
-
         Raises:
             Exception: Если строка заголовка не найдена.
         """
         self.logger.info(f"Начало чтения таблицы с листа '{sheet_name}'")
-
         try:
             # 1. чтение листа
             df_whole = pd.read_excel(
@@ -207,7 +196,6 @@ class ExcelParser:
             self.logger.error(
                 f"Ошибка при чтении листа '{sheet_name}' из файла '{self.filename}': {e}")
             raise
-
         # 2. поиск строки шапки
         self.logger.debug(
             f"Поиск строки заголовка с колонками {required_headers} на листе '{sheet_name}'")
@@ -223,16 +211,13 @@ class ExcelParser:
                 self.logger.info(
                     f"Строка заголовка найдена на позиции {idx + 1} (индекс pandas: {idx})")
                 break
-
         if not found:
             error_msg = (f"Не найден заголовок с колонками {required_headers} "
                          f"на листе '{sheet_name}'. Проверено {rows_searched} строк.")
             self.logger.error(error_msg)
             raise Exception(error_msg)
-
         # Убедимся, что header_row не None (это должно быть верно из-за проверки выше)
         assert header_row is not None
-
         # 3. обработка DataFrame
         self.logger.debug(
             f"Обработка данных после строки заголовка {header_row + 1}")
@@ -244,7 +229,6 @@ class ExcelParser:
         df_out = df_table[cols]
         self.logger.debug(
             f"DataFrame после обработки заголовка. Размер: {df_out.shape}")
-
         # 4. фильтрация по красному цвету
         self.logger.info(
             f"Начало фильтрации строк по цвету для таблицы на листе '{sheet_name}'")
@@ -253,18 +237,23 @@ class ExcelParser:
         df_out = df_out.iloc[clean_rows].reset_index(drop=True)
         self.logger.info(
             f"Таблица с листа '{sheet_name}' успешно прочитана и отфильтрована. Итоговый размер: {df_out.shape}")
-
         return df_out
 
     def build_structure(self) -> List[Dict[str, Any]]:
         """
         Строит структуру категорий из Excel-файла.
-
         Returns:
             List[Dict[str, Any]]: Список словарей, представляющих структуру категорий.
         """
         self.logger.info(
             f"Начало построения структуры из файла Excel: {self.filename}")
+
+        # --- Используем переопределенные значения, если они заданы ---
+        sheet_categories = self._override_sheet_categories if self._override_sheet_categories else SHEET_CATEGORIES
+        sheet_templates = self._override_sheet_templates if self._override_sheet_templates else SHEET_TEMPLATES
+        self.logger.info(
+            f"Используются листы: Категории='{sheet_categories}', Шаблоны='{sheet_templates}'")
+        # ------------------------------------------------------------
 
         try:
             self.logger.info(f"Открытие файла Excel: {self.filename}")
@@ -272,38 +261,34 @@ class ExcelParser:
                 self.logger.info(f"Файл {self.filename} успешно открыт.")
                 self.logger.debug(
                     f"Доступные листы в файле: {xls.sheet_names}")
-
                 self.logger.info(
-                    f"Чтение таблицы категорий с листа '{SHEET_CATEGORIES}'...")
-                cats_df = self._read_table_by_header_df(SHEET_CATEGORIES, {
+                    f"Чтение таблицы категорий с листа '{sheet_categories}'...")
+                # cats_df = self._read_table_by_header_df(SHEET_CATEGORIES, { # Было
+                cats_df = self._read_table_by_header_df(sheet_categories, {  # Стало
                                                         COL_CATEGORY_TYPE, COL_CATEGORY})
                 self.logger.info(
                     f"Таблица категорий прочитана. Размер: {cats_df.shape}")
-
                 self.logger.info(
-                    f"Чтение таблицы шаблонов с листа '{SHEET_TEMPLATES}'...")
-                expr_df = self._read_table_by_header_df(SHEET_TEMPLATES, {
+                    f"Чтение таблицы шаблонов с листа '{sheet_templates}'...")
+                # expr_df = self._read_table_by_header_df(SHEET_TEMPLATES, { # Было
+                expr_df = self._read_table_by_header_df(sheet_templates, {  # Стало
                                                         COL_TEMPLATE_CATEGORY, COL_TEMPLATE_EXPRESSION})
                 self.logger.info(
                     f"Таблица шаблонов прочитана. Размер: {expr_df.shape}")
-
             self.logger.info(f"Файл {self.filename} закрыт.")
         except Exception as e:
             self.logger.error(
                 f"Ошибка при открытии/чтении файла {self.filename}: {e}")
             raise
-
         initial_cat_count = len(cats_df)
         self.logger.info(
             f"Начало обработки {initial_cat_count} строк категорий")
         cats_df[COL_CATEGORY_TYPE] = cats_df[COL_CATEGORY_TYPE].ffill()
         self.logger.debug(
             "Заполнение пропущенных значений 'Тип категории' завершено")
-
         cat_types = []
         categories_by_type = defaultdict(list)
         skipped_cat_rows = 0
-
         for index, row in cats_df.iterrows():
             ctype = str(row[COL_CATEGORY_TYPE]).strip()
             cname = str(row[COL_CATEGORY]).strip()
@@ -323,17 +308,14 @@ class ExcelParser:
             categories_by_type[ctype].append({'name': cname, 'templates': []})
             self.logger.debug(
                 f"Добавлена категория '{cname}' к типу '{ctype}'")
-
         self.logger.info(f"Обработка категорий завершена. "
                          f"Всего строк: {initial_cat_count}, Пропущено: {skipped_cat_rows}, "
                          f"Уникальных типов: {len(cat_types)}, Всего категорий: {sum(len(cats) for cats in categories_by_type.values())}")
-
         initial_expr_count = len(expr_df)
         self.logger.info(
             f"Начало обработки {initial_expr_count} строк шаблонов")
         templates_by_cat = defaultdict(list)
         skipped_expr_rows = 0
-
         for index, row in expr_df.iterrows():
             catname = str(row[COL_TEMPLATE_CATEGORY]).strip()
             expr = str(row[COL_TEMPLATE_EXPRESSION]).strip()
@@ -345,16 +327,13 @@ class ExcelParser:
                 self.logger.debug(
                     f"Пропущена строка шаблона {index + 1} из-за пустого выражения")
                 skipped_expr_rows += 1
-
         self.logger.info(f"Обработка шаблонов завершена. "
                          f"Всего строк: {initial_expr_count}, Пропущено: {skipped_expr_rows}, "
                          f"Категорий с шаблонами: {len(templates_by_cat)}")
-
         self.logger.info("Начало формирования финальной структуры")
         structure = []
         total_cats_in_structure = 0
         total_templates_in_structure = 0
-
         for ctype in cat_types:
             cats_out = []
             for cat in categories_by_type[ctype]:
@@ -371,17 +350,13 @@ class ExcelParser:
                 if templates:
                     self.logger.debug(
                         f"Категория '{cname}' связана с {len(templates)} шаблонами")
-
             type_dict = {'name': ctype, 'categories': cats_out}
             structure.append(type_dict)
-
         self.logger.info(f"Формирование структуры завершено.")
         self.logger.info(f"Итоговая структура: {len(structure)} типов категорий, "
                          f"{total_cats_in_structure} категорий, "
                          f"{total_templates_in_structure} шаблонов")
-
         return structure
-
 
 # --- Пример использования ---
 # if __name__ == "__main__":
