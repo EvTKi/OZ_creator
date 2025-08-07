@@ -384,9 +384,9 @@ class ExcelParser:
 
 
 # --- Пример использования ---
-if __name__ == "__main__":
-    from config import DEBUG_FILE_NAME
-    logger_manager = LogManager(DEBUG_FILE_NAME)
-    parser = ExcelParser(DEBUG_FILE_NAME, logger_manager)
-    structure = parser.build_structure()
-    print(structure)
+# if __name__ == "__main__":
+#     from config import DEBUG_FILE_NAME
+#     logger_manager = LogManager(DEBUG_FILE_NAME)
+#     parser = ExcelParser(DEBUG_FILE_NAME, logger_manager)
+#     structure = parser.build_structure()
+#     print(structure)

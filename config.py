@@ -98,6 +98,6 @@ def generate_uid() -> str:
 
 
 # --- Пример использования ---
-print(f"Debug file: {DEBUG_FILE_NAME}")
-print(f"Red colors: {RED_LIKE_COLORS}")
-print(f"Namespaces: {NSMAP}")
+# print(f"Debug file: {DEBUG_FILE_NAME}")
+# print(f"Red colors: {RED_LIKE_COLORS}")
+# print(f"Namespaces: {NSMAP}")

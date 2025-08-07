@@ -63,6 +63,6 @@
 		"template_expression": "Ключевое выражение"
 	},
 	"paths": {
-		"log_dir": "./log"
+		"log_dir": ".\\log"
 	}
 }
