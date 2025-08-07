@@ -1,86 +1,103 @@
 # config.py
-from dataclasses import dataclass
-from typing import List, Set, Optional
+"""
+Модуль конфигурации проекта.
+Загружает настройки из config.json.
+"""
+
+import json
+import os
 import uuid
+from typing import Dict, Any
+import sys
+
+# --- Путь к конфигурационному файлу ---
+# Определяем путь к config.json относительно этого модуля
+# Это важно для PyInstaller, который может запускать из временной папки
 
 
-# ———————————————————————
-# 🎨 Цвета, ассоциированные с "красным" (в формате FFRRGGBB)
-# ———————————————————————
-RED_LIKE_COLORS: Set[str] = {
-    'FFFF0000',  # Чистый красный
-    'FFCC0000',  # Тёмно-красный
-    'FF990000',
-    'FF660000',
-    'FF330000',
-    'FF8B0000',  # Deep Red
-    'FFFF3333',  # Светло-красный
-    'FFFF6666',
-    'FFFF9999',
-    'FFFFCCCC',
-    'FFD32121',  # Red (Office)
-    'FFB80C0C',  # Dark Red
-    'FFA52222',
-    'FFE66161',  # Light Red
-    'FFE74C3C',  # Flat UI Red
-    'FFC0392B',  # Alizarin
-    'FFD91E18',  # Material Red
-}
+def get_config_path() -> str:
+    """Получает путь к config.json, учитывая PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Если запущено как .exe, ищем рядом с исполняемым файлом
+        application_path = os.path.dirname(sys.executable)
+    else:
+        # Если запущено как скрипт, ищем в текущей директории
+        application_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(application_path, 'config.json')
 
-# ———————————————————————
-# 📊 Индексированные цвета Excel, ассоциированные с красным
-# https://openpyxl.readthedocs.io/en/stable/styles.html#colours
-# ———————————————————————
-RED_INDEXED_COLORS: Set[int] = {3,   # Red (в стандартной палитре)
-                                10,  # Bright Red
-                                46}  # Accent2 Red (в некоторых темах)
+# --- Загрузка конфигурации ---
 
-# ———————————————————————
-# 🎭 Темы Excel, которые могут быть красными (theme + tint)
-# ———————————————————————
-RED_THEME_INDICES: Set[int] = {5, 6, 7}  # Условно: красные темы
-# tint > -0.5 считается "достаточно красным"
-RED_THEME_TINT_THRESHOLD: float = -0.5
 
-# ———————————————————————
-# ⏳ Хранение: глубина по умолчанию (в днях)
-# ———————————————————————
-DEFAULT_STORAGE_DEPTH: int = 1095  # 3 года
+def load_config() -> Dict[str, Any]:
+    """Загружает конфигурацию из config.json."""
+    config_path = get_config_path()
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Конфигурационный файл не найден: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Ошибка парсинга config.json: {e}")
 
-# ———————————————————————
-# 📅 Формат даты для Model.created
-# ———————————————————————
-MODEL_CREATED_FORMAT: str = "%Y-%m-%dT%H:%M:%S.000Z"
 
-# ———————————————————————
-# 🧩 RDF/MD/CIM Namespaces
-# ———————————————————————
-NSMAP = {
-    'rdf': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#',
-    'md': 'http://iec.ch/TC57/61970-552/ModelDescription/1#',
-    'cim': 'http://iec.ch/TC57/2014/CIM-schema-cim16#',
-    'me': 'http://monitel.com/2014/schema-cim16#',
-}
+# --- Глобальная константа с конфигурацией ---
+CONFIG = load_config()
 
-# ———————————————————————
-# 🧱 Значения по умолчанию для полей
-# ———————————————————————
-DEFAULT_ORDER: int = 0
-DEFAULT_MESSAGE_REQUIRED: bool = False
-DEFAULT_REPORT_HIGHER: bool = False
-DEFAULT_SHIFT_RESTRICTED: bool = False
-DEFAULT_ACTION_TIME_SHIFT: bool = False
+# --- Экспорт значений для удобства ---
+# Debug
+DEBUG_PARENT_UID: str = CONFIG['debug']['parent_uid']
+DEBUG_FILE_NAME: str = CONFIG['debug']['file_name']
 
-# ———————————————————————
-# 🆔 Глобальный UID (только для отладки!)
-# В реальной системе должен передаваться!
-# ———————————————————————
+# Colors
+RED_LIKE_COLORS: set = set(CONFIG['colors']['red_like_colors'])
+RED_INDEXED_COLORS: set = set(CONFIG['colors']['red_indexed_colors'])
+RED_THEME_INDICES: set = set(CONFIG['colors']['red_theme_indices'])
+RED_THEME_TINT_THRESHOLD: float = CONFIG['colors']['red_theme_tint_threshold']
+
+# Defaults
+DEFAULT_STORAGE_DEPTH: int = CONFIG['defaults']['storage_depth']
+DEFAULT_ORDER: int = CONFIG['defaults']['order']
+DEFAULT_MESSAGE_REQUIRED: bool = CONFIG['defaults']['message_required']
+DEFAULT_REPORT_HIGHER: bool = CONFIG['defaults']['report_higher']
+DEFAULT_SHIFT_RESTRICTED: bool = CONFIG['defaults']['shift_restricted']
+DEFAULT_ACTION_TIME_SHIFT: bool = CONFIG['defaults']['action_time_shift']
+
+# Formatting
+MODEL_CREATED_FORMAT: str = CONFIG['formatting']['model_created_format']
+
+# Namespaces
+NSMAP: Dict[str, str] = CONFIG['namespaces']
+
+# Sheet & Column Names
+SHEET_CATEGORIES: str = CONFIG['sheet_names']['categories']
+SHEET_TEMPLATES: str = CONFIG['sheet_names']['templates']
+COL_CATEGORY_TYPE: str = CONFIG['column_names']['category_type']
+COL_CATEGORY: str = CONFIG['column_names']['category']
+COL_TEMPLATE_CATEGORY: str = CONFIG['column_names']['template_category']
+COL_TEMPLATE_EXPRESSION: str = CONFIG['column_names']['template_expression']
+
+# Paths
+LOG_DIR: str = CONFIG['paths']['log_dir']
+
+# --- Функции ---
 
 
 def generate_uid() -> str:
+    """Генерирует универсальный уникальный идентификатор (UUID4).
+
+    Returns:
+        str: Строка UUID4 в формате 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'.
+    """
     return str(uuid.uuid4())
 
+# --- Для PyInstaller ---
+# Убедимся, что config.json будет включен в сборку
+# Это нужно указать в .spec файле PyInstaller:
+# datas=[('config.json', '.')],
 
-# Можно заменить на конкретный, если нужно
-DEBUG_PARENT_UID: str = '0377FACB-0EA4-4990-A4DD-DC9DE6BFB5B4'
-DEBUG_FILE_NAME = 'Опросный лист ОЖ. Станции.xlsx'
+
+# --- Пример использования ---
+print(f"Debug file: {DEBUG_FILE_NAME}")
+print(f"Red colors: {RED_LIKE_COLORS}")
+print(f"Namespaces: {NSMAP}")

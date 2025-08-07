@@ -1,0 +1,68 @@
+{
+	"debug": {
+		"parent_uid": "0377FACB-0EA4-4990-A4DD-DC9DE6BFB5B4",
+		"file_name": "Опросный лист ОЖ. Станции.xlsx"
+	},
+	"colors": {
+		"red_like_colors": [
+			"FFFF0000",
+			"FFCC0000",
+			"FF990000",
+			"FF660000",
+			"FF330000",
+			"FF8B0000",
+			"FFFF3333",
+			"FFFF6666",
+			"FFFF9999",
+			"FFFFCCCC",
+			"FFD32121",
+			"FFB80C0C",
+			"FFA52222",
+			"FFE66161",
+			"FFE74C3C",
+			"FFC0392B",
+			"FFD91E18"
+		],
+		"red_indexed_colors": [
+			3,
+			10,
+			46
+		],
+		"red_theme_indices": [
+			5,
+			6,
+			7
+		],
+		"red_theme_tint_threshold": -0.5
+	},
+	"defaults": {
+		"storage_depth": 1095,
+		"order": 0,
+		"message_required": false,
+		"report_higher": false,
+		"shift_restricted": false,
+		"action_time_shift": false
+	},
+	"formatting": {
+		"model_created_format": "%Y-%m-%dT%H:%M:%S.000Z"
+	},
+	"namespaces": {
+		"rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+		"md": "http://iec.ch/TC57/61970-552/ModelDescription/1#",
+		"cim": "http://iec.ch/TC57/2014/CIM-schema-cim16#",
+		"me": "http://monitel.com/2014/schema-cim16#"
+	},
+	"sheet_names": {
+		"categories": "Категории событий",
+		"templates": "Ключевые выражения категорий"
+	},
+	"column_names": {
+		"category_type": "Тип категории",
+		"category": "Категория",
+		"template_category": "Категория события",
+		"template_expression": "Ключевое выражение"
+	},
+	"paths": {
+		"log_dir": "./log"
+	}
+}
