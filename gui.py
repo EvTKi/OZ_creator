@@ -132,10 +132,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.worker_thread = None
         self.log_handler = None
-        # --- Новые атрибуты для ComboBox ---
-        self.categories_sheet_combo = None
-        self.templates_sheet_combo = None
-        # ----------------------------------
+        # --- Явная инициализация атрибутов ComboBox ---
+        # Это устраняет предупреждения Pylance о доступе к атрибутам None
+        self.categories_sheet_combo: Optional[QComboBox] = None
+        self.templates_sheet_combo: Optional[QComboBox] = None
+        # -----------------------------------------------
         self.init_ui()
         self.setup_logging()
 
@@ -145,7 +146,6 @@ class MainWindow(QMainWindow):
         # Увеличил высоту для новых элементов
         self.setGeometry(100, 100, 800, 650)
 
-        # --- Центральный виджет ---
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
@@ -156,7 +156,6 @@ class MainWindow(QMainWindow):
         # Поле для пути к Excel-файлу
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setPlaceholderText("Путь к Excel-файлу...")
-        # Загружаем значение по умолчанию из config
         self.file_path_edit.setText(str(Path(DEBUG_FILE_NAME).resolve()) if Path(
             DEBUG_FILE_NAME).exists() else DEBUG_FILE_NAME)
         self.browse_button = QPushButton("Обзор...")
@@ -166,31 +165,24 @@ class MainWindow(QMainWindow):
         file_layout.addWidget(self.browse_button)
         form_layout.addRow(QLabel("Файл Excel:"), file_layout)
 
-        # --- Новые ComboBox для выбора листов ---
-        # Выбор листа категорий
-        self.categories_sheet_combo = QComboBox()
-        self.categories_sheet_combo.setEditable(
-            True)  # Позволяет вводить текст вручную
-        # Значение по умолчанию из config
+        # --- Инициализация и добавление ComboBox ---
+        # Теперь мы уверены, что атрибуты существуют
+        self.categories_sheet_combo = QComboBox()  # <-- Создание объекта
+        self.categories_sheet_combo.setEditable(True)
         self.categories_sheet_combo.addItem(SHEET_CATEGORIES)
-        # self.categories_sheet_combo.setCurrentText(SHEET_CATEGORIES) # Устанавливается выше
         form_layout.addRow(QLabel("Лист категорий:"),
                            self.categories_sheet_combo)
 
-        # Выбор листа шаблонов
-        self.templates_sheet_combo = QComboBox()
+        self.templates_sheet_combo = QComboBox()  # <-- Создание объекта
         self.templates_sheet_combo.setEditable(True)
-        # Значение по умолчанию из config
         self.templates_sheet_combo.addItem(SHEET_TEMPLATES)
-        # self.templates_sheet_combo.setCurrentText(SHEET_TEMPLATES) # Устанавливается выше
         form_layout.addRow(QLabel("Лист шаблонов:"),
                            self.templates_sheet_combo)
-        # ---------------------------------------
+        # ------------------------------------------
 
         # Поле для Parent UID
         self.uid_edit = QLineEdit()
         self.uid_edit.setPlaceholderText("Введите Parent UID...")
-        # Загружаем значение по умолчанию из config
         self.uid_edit.setText(DEBUG_PARENT_UID)
         form_layout.addRow(QLabel("Parent UID:"), self.uid_edit)
 
@@ -203,14 +195,13 @@ class MainWindow(QMainWindow):
 
         # --- Прогресс-бар ---
         self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)  # Неопределенный прогресс
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setVisible(False)
         main_layout.addWidget(self.progress_bar)
 
         # --- Область логов ---
         self.log_text_edit = QTextEdit()
         self.log_text_edit.setReadOnly(True)
-        # Устанавливаем моноширинный шрифт для лучшего отображения логов
         font = self.log_text_edit.font()
         font.setFamily("Courier New")
         font.setPointSize(9)
@@ -227,10 +218,10 @@ class MainWindow(QMainWindow):
         self.open_log_button.clicked.connect(self.open_log_folder)
         self.actions_layout.addWidget(self.open_xml_button)
         self.actions_layout.addWidget(self.open_log_button)
-        self.actions_layout.addStretch()  # Растягиваем оставшееся пространство
+        self.actions_layout.addStretch()
         main_layout.addLayout(self.actions_layout)
 
-        self.output_xml_path = None  # Для хранения пути к созданному XML
+        self.output_xml_path = None
 
     def setup_logging(self):
         """Настройка системы логирования для перенаправления в GUI."""
@@ -276,37 +267,41 @@ class MainWindow(QMainWindow):
         Загружает список имен листов из Excel-файла и заполняет ComboBox.
         """
         try:
-            # Используем pandas для получения списка листов
-            # Это быстрее и проще, чем openpyxl для этой задачи
+            # Проверка на None (для Pylance и безопасности)
+            if self.categories_sheet_combo is None or self.templates_sheet_combo is None:
+                self.append_log("Ошибка: ComboBox не инициализированы.")
+                return
+
             with pd.ExcelFile(file_path) as xls:
                 sheet_names = xls.sheet_names
 
             if sheet_names:
-                # Сохраняем текущий текст, если он есть и валиден
+                # Преобразуем список в список строк, чтобы избежать ошибок типов
+                sheet_names_str = [str(name) for name in sheet_names]
+
                 current_cat_text = self.categories_sheet_combo.currentText()
                 current_tmpl_text = self.templates_sheet_combo.currentText()
 
                 # Очищаем и заполняем ComboBox
                 self.categories_sheet_combo.clear()
                 self.templates_sheet_combo.clear()
-                self.categories_sheet_combo.addItems(sheet_names)
-                self.templates_sheet_combo.addItems(sheet_names)
+                # Передаем список строк
+                self.categories_sheet_combo.addItems(sheet_names_str)
+                self.templates_sheet_combo.addItems(sheet_names_str)
 
-                # Пытаемся восстановить предыдущий выбор или использовать значения по умолчанию
-                if current_cat_text in sheet_names:
+                if current_cat_text in sheet_names_str:
                     self.categories_sheet_combo.setCurrentText(
                         current_cat_text)
-                elif SHEET_CATEGORIES in sheet_names:  # Если дефолтное значение есть
+                elif SHEET_CATEGORIES in sheet_names_str:
                     self.categories_sheet_combo.setCurrentText(
                         SHEET_CATEGORIES)
                 else:
-                    self.categories_sheet_combo.setCurrentIndex(
-                        0)  # Иначе первый доступный
+                    self.categories_sheet_combo.setCurrentIndex(0)
 
-                if current_tmpl_text in sheet_names:
+                if current_tmpl_text in sheet_names_str:
                     self.templates_sheet_combo.setCurrentText(
                         current_tmpl_text)
-                elif SHEET_TEMPLATES in sheet_names:
+                elif SHEET_TEMPLATES in sheet_names_str:
                     self.templates_sheet_combo.setCurrentText(SHEET_TEMPLATES)
                 else:
                     self.templates_sheet_combo.setCurrentIndex(0)
@@ -317,36 +312,23 @@ class MainWindow(QMainWindow):
         except Exception as e:
             error_msg = f"Ошибка при загрузке списка листов: {e}"
             self.append_log(error_msg)
-            # Можно также показать QMessageBox.warning(self, "Ошибка", error_msg)
-    # ------------------------------------------
 
     def start_processing(self):
         """Запускает процесс обработки в отдельном потоке."""
         excel_file = self.file_path_edit.text().strip()
         parent_uid = self.uid_edit.text().strip()
 
+        # Проверка на None (для Pylance и безопасности)
+        if self.categories_sheet_combo is None or self.templates_sheet_combo is None:
+            QMessageBox.critical(
+                self, "Ошибка", "ComboBox не инициализированы.")
+            return
+
         # --- Получение значений из ComboBox ---
         sheet_categories_name = self.categories_sheet_combo.currentText().strip()
         sheet_templates_name = self.templates_sheet_combo.currentText().strip()
         # -------------------------------------
-
-        if not excel_file:
-            QMessageBox.warning(self, "Ошибка ввода",
-                                "Пожалуйста, выберите Excel-файл.")
-            return
-        if not os.path.exists(excel_file):
-            QMessageBox.critical(self, "Ошибка файла",
-                                 f"Файл не найден: {excel_file}")
-            return
-        # Проверка на пустые имена листов
-        if not sheet_categories_name:
-            QMessageBox.warning(self, "Ошибка ввода",
-                                "Пожалуйста, введите или выберите имя листа категорий.")
-            return
-        if not sheet_templates_name:
-            QMessageBox.warning(self, "Ошибка ввода",
-                                "Пожалуйста, введите или выберите имя листа шаблонов.")
-            return
+        # Можно также показать QMessageBox.warning(self, "Ошибка", error_msg)
 
         # if not parent_uid: # UID может быть опциональным, если используется дефолтный
         #     QMessageBox.warning(self, "Ошибка ввода", "Пожалуйста, введите Parent UID.")
