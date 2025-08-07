@@ -1,56 +1,160 @@
+# xlsx_parser.py
 import pandas as pd
 from collections import defaultdict
 import pprint
 import logging
 from logging_config import setup_logging
-from debug_config import *
+from config import *
 import openpyxl
+from config import *
 
 
 def get_non_red_rows(excel_filename, sheet_name, header_row_idx, nrows):
     """
-    Возвращает список индексов (относительно DataFrame!) строк, в которых НЕТ красного цвета ни в шрифте, ни в заливке.
-    header_row_idx — строка с заголовками (индекс в openpyxl, начинается с 1).
-    nrows — сколько строк читать (длина DataFrame после header).
+    Возвращает индексы строк (относительно DataFrame), в которых отсутствует красный цвет 
+    в заливке ячеек или цвете шрифта.
+
+    Функция анализирует указанный диапазон строк в Excel-файле с использованием `openpyxl`, 
+    чтобы проверить, содержит ли хотя бы одна ячейка в строке цвет, распознаваемый как "красный".
+    Строки, содержащие красный цвет, считаются "помеченными на удаление" или "неактивными" 
+    и исключаются из результата.
+
+    Поддерживаемые типы красного цвета:
+    - RGB-цвета в формате ARGB или RGB (например, 'FFFF0000', 'FFCC0000').
+    - Индексированные цвета Excel (например, индекс 10 — стандартный красный).
+    - Тематические цвета (theme colors), часто используемые в стилях Excel, 
+      особенно при применении встроенных тем оформления.
+    - Учитывается параметр `tint` (затемнение/осветление), чтобы избежать ложных срабатываний 
+      на сильно осветлённых оттенках.
+
+    Алгоритм:
+    1. Загружает рабочую книгу с помощью `openpyxl`.
+    2. Для каждой строки в указанном диапазоне проверяет все ячейки.
+    3. Проверяет цвет заливки (`fill.fgColor`) и цвет шрифта (`font.color`).
+    4. Цвет считается красным, если:
+        - Его RGB-значение входит в предопределённый набор "красных" цветов, ИЛИ
+        - Это тематический цвет с номером, ассоциированным с красным (5, 6, 7), 
+          и не сильно осветлён (`tint > -0.5`), ИЛИ
+        - Это индексированный цвет, соответствующий красному (например, 3, 10, 46).
+    5. Если хотя бы одна ячейка в строке содержит красный цвет — строка отбрасывается.
+
+    Примечания:
+    - Используется `data_only=True` — читаются значения формул, а не формулы.
+    - Функция устойчива к отсутствующим атрибутам цвета (обрабатывает `None`, `auto` и т.п.).
+    - Индексация в Excel начинается с 1; индексация в pandas — с 0.
+      Результат возвращается в индексации pandas (относительно начала таблицы после заголовка).
+
+    Args:
+        excel_filename (str): Путь к Excel-файлу (.xlsx).
+        sheet_name (str): Имя листа, на котором выполняется проверка.
+        header_row_idx (int): Номер строки заголовка в Excel (индексация с 1).
+                              Следующие строки (header_row_idx + 1 и далее) анализируются.
+        nrows (int): Количество строк для анализа (начиная сразу после заголовка).
+
+    Returns:
+        list[int]: Список индексов строк (в индексации pandas/DataFrame), 
+                   в которых НЕТ красного цвета ни в одной ячейке.
+                   Например, если первая строка данных (после заголовка) не красная, 
+                   в список попадёт 0.
+
+    Raises:
+        FileNotFoundError: Если файл не найден.
+        KeyError: Если лист с указанным именем отсутствует.
+        Exception: При ошибках чтения файла (недоступность, повреждение и т.п.).
+
+    Example:
+        >>> get_non_red_rows("events.xlsx", "Категории", 3, 10)
+        [0, 1, 2, 4, 5, 7, 8]  # 3 строки с красным цветом были отфильтрованы
     """
+
+    def is_red_color(color):
+        """
+        Проверяет, является ли цвет (Font.color или Fill.fgColor) красным.
+        Поддерживает строки, объекты RGB, theme, indexed.
+        Обернута в try-except для устойчивости.
+        """
+        if color is None:
+            return False
+
+        # 1. Проверка по RGB (разные форматы)
+        try:
+            if hasattr(color, 'rgb') and color.rgb is not None:
+                rgb_val = color.rgb
+                rgb_str = None
+
+                if isinstance(rgb_val, str):
+                    rgb_str = rgb_val
+                elif hasattr(rgb_val, 'rgb') and isinstance(rgb_val.rgb, str):
+                    rgb_str = rgb_val.rgb  # случай: RGB(fFFFF0000)
+                elif str(rgb_val).startswith('RGB:'):
+                    try:
+                        rgb_hex = str(rgb_val).split(':', 1)[1].strip()
+                        if len(rgb_hex) in (6, 8) and all(c in '0123456789ABCDEFabcdef' for c in rgb_hex):
+                            rgb_str = rgb_hex
+                    except Exception as e:
+                        logging.debug(
+                            f"Не удалось распарсить RGB из строки: {rgb_val}, ошибка: {e}")
+
+                if rgb_str:
+                    rgb_str = rgb_str.upper()
+                    if len(rgb_str) == 8 and rgb_str.startswith('FF'):
+                        full_rgb = rgb_str
+                    elif len(rgb_str) == 8:
+                        full_rgb = 'FF' + rgb_str[2:]
+                    elif len(rgb_str) == 6:
+                        full_rgb = 'FF' + rgb_str
+                    else:
+                        full_rgb = None
+
+                    if full_rgb and full_rgb in RED_LIKE_COLORS:
+                        return True
+        except Exception as e:
+            logging.debug(f"Ошибка при обработке RGB цвета {color}: {e}")
+
+        # 2. Theme color
+        try:
+            if hasattr(color, 'theme') and color.theme is not None:
+                if color.theme in (5, 6, 7):
+                    tint = getattr(color, 'tint', 0.0)
+                    if isinstance(tint, (int, float)) and tint > -0.5:
+                        return True
+        except Exception as e:
+            logging.debug(f"Ошибка при обработке theme цвета {color}: {e}")
+
+        # 3. Indexed color
+        try:
+            if hasattr(color, 'indexed'):
+                if color.indexed in (3, 10, 46):
+                    return True
+        except Exception as e:
+            logging.debug(f"Ошибка при обработке indexed цвета {color}: {e}")
+
+        return False
+
     wb = openpyxl.load_workbook(excel_filename, data_only=True)
     ws = wb[sheet_name]
     result = []
-    for ex_idx in range(header_row_idx+1, header_row_idx+1+nrows):
+
+    for ex_idx in range(header_row_idx + 1, header_row_idx + 1 + nrows):
         is_red = False
         for cell in ws[ex_idx]:
-            # Проверяем заливку
+            # Проверка заливки
             fill = cell.fill
-            fgColor = getattr(fill, 'fgColor', None)
-            color_str = ""
-            try:
-                if fgColor is not None:
-                    if hasattr(fgColor, 'rgb') and isinstance(fgColor.rgb, str):
-                        color_str = fgColor.rgb
-                    elif hasattr(fgColor, 'rgb') and fgColor.rgb is not None:
-                        color_str = str(fgColor.rgb)
-                if color_str and color_str.upper() == 'FFFF0000':
-                    is_red = True
-            except Exception:
-                pass
-            # Проверяем шрифт
-            font_color = getattr(cell.font, 'color', None)
-            font_color_str = ""
-            try:
-                if font_color is not None:
-                    if hasattr(font_color, 'rgb') and isinstance(font_color.rgb, str):
-                        font_color_str = font_color.rgb
-                    elif hasattr(font_color, 'rgb') and font_color.rgb is not None:
-                        font_color_str = str(font_color.rgb)
-                if font_color_str and font_color_str.upper() == 'FFFF0000':
-                    is_red = True
-            except Exception:
-                pass
-            if is_red:
+            fg_color = getattr(fill, 'fgColor', None)
+            if fg_color is not None and is_red_color(fg_color):
+                is_red = True
                 break
+
+            # Проверка шрифта
+            font_color = getattr(cell.font, 'color', None)
+            if font_color is not None and is_red_color(font_color):
+                is_red = True
+                break
+
         if not is_red:
-            # индекс относительно DataFrame
-            result.append(ex_idx - (header_row_idx+1))
+            df_index = ex_idx - (header_row_idx + 1)
+            result.append(df_index)
+
     return result
 
 
@@ -131,7 +235,7 @@ def build_structure_from_excel(filename):
             cname = cat['name']
             templates = templates_by_cat.get(cname, [])
             cats_out.append(
-                {'name': cname, 'storageDepth': 1095, 'templates': templates})
+                {'name': cname, 'storageDepth': DEFAULT_STORAGE_DEPTH, 'templates': templates})
         structure.append({'name': ctype, 'categories': cats_out})
 
     logging.info(f"Построена структура: {len(structure)} типов категорий")

@@ -1,5 +1,5 @@
 # main.py
-from debug_config import *
+from config import *
 from xlsx_parser import build_structure_from_excel
 from cim_xml_creator import create_cim_xml
 import os
