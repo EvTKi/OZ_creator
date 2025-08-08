@@ -20,10 +20,10 @@ from PyQt5.QtCore import QThread, pyqtSignal, QObject, Qt
 from PyQt5.QtGui import QFont, QPalette, QColor, QIcon
 
 # Импорты из вашего проекта
-from config import DEBUG_FILE_NAME, DEBUG_PARENT_UID, LOG_DIR, SHEET_CATEGORIES, SHEET_TEMPLATES
-from logging_config import LogManager
-from xlsx_parser import ExcelParser
-from cim_xml_creator import CIMXMLGenerator
+from modules.config import DEBUG_FILE_NAME, DEBUG_PARENT_UID, LOG_DIR, SHEET_CATEGORIES, SHEET_TEMPLATES
+from modules.logging_config import LogManager
+from modules.xlsx_parser import ExcelParser
+from modules.cim_xml_creator import CIMXMLGenerator
 
 # --- 1. Кастомный лог-хендлер для перенаправления логов в GUI ---
 
