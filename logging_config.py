@@ -5,9 +5,8 @@
 
 import logging
 import os
-import sys  # Добавлено для PyInstaller
+import sys
 from datetime import datetime
-# Импортируем LOG_DIR из нового config.py
 from config import LOG_DIR
 
 
@@ -17,58 +16,69 @@ class LogManager:
     Настраивает логирование как в файл, так и в консоль.
     """
 
-    def __init__(self, xlsx_filename: str, log_level: int = logging.INFO):
+    def __init__(self, log_level: int = logging.INFO):  # Изменено: убираем filename из __init__
         """
         Инициализирует менеджер логирования.
 
         Args:
-            xlsx_filename (str): Путь к обрабатываемому Excel-файлу.
             log_level (int, optional): Уровень логирования. По умолчанию logging.INFO.
         """
-        self.xlsx_filename = xlsx_filename
         self.log_level = log_level
-        self.log_file = self._setup_logging()
+        self.logger_configured = False
+        self._setup_base_logging()
 
-    def _setup_logging(self) -> str:
+    def _setup_base_logging(self):
+        """Настраивает базовое логирование (консоль). Файловый хендлер будет добавлен позже."""
+        if not self.logger_configured:
+            log_format = "%(asctime)s [%(levelname)s] %(message)s"
+            date_format = "%d.%m.%Y %H:%M:%S"
+
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(
+                logging.Formatter(log_format, datefmt=date_format))
+
+            root_logger = logging.getLogger()
+            root_logger.setLevel(self.log_level)
+            root_logger.addHandler(console_handler)
+
+            self.logger_configured = True
+
+    def setup_file_handler(self, base_filename: str):
         """
-        Настраивает систему логирования.
+        Добавляет файловый хендлер к логгеру с именем, основанным на base_filename.
 
-        Создает директорию для логов (если не существует) и файл лога с именем,
-        основанным на имени Excel-файла и текущей дате.
-
-        Returns:
-            str: Полный путь к созданному лог-файлу.
+        Args:
+            base_filename (str): Имя выходного файла (без пути и расширения),
+                                 например, 'output_data' для файла 'output_data.xml'.
         """
-        # Используем os.path.basename для надежности
-        base = os.path.splitext(os.path.basename(self.xlsx_filename))[0]
-        date = datetime.now().strftime("%d.%m.%Y")
-
         # Учитываем PyInstaller при создании пути к директории логов
         if getattr(sys, 'frozen', False):
-            # Если .exe, создаем log в той же папке, что и .exe
             log_dir_full = os.path.join(
                 os.path.dirname(sys.executable), LOG_DIR)
         else:
             log_dir_full = LOG_DIR
 
         os.makedirs(log_dir_full, exist_ok=True)
-        log_file = os.path.join(log_dir_full, f"{base}_{date}.log")
 
+        date = datetime.now().strftime("%d.%m.%Y")
+        log_file = os.path.join(log_dir_full, f"{base_filename}_{date}.log")
+
+        # Проверяем, не добавлен ли уже файловый хендлер
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler):
+                root_logger.removeHandler(handler)
+                handler.close()
+
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
         log_format = "%(asctime)s [%(levelname)s] %(message)s"
-        date_format = "%d.%m.%Y"
+        date_format = "%d.%m.%Y %H:%M:%S"
+        file_handler.setFormatter(logging.Formatter(
+            log_format, datefmt=date_format))
 
-        # Проверка, не настроено ли уже логирование
-        if not logging.getLogger().handlers:
-            logging.basicConfig(
-                level=self.log_level,
-                format=log_format,
-                datefmt=date_format,
-                handlers=[
-                    logging.FileHandler(log_file, encoding="utf-8"),
-                    logging.StreamHandler()
-                ]
-            )
-        return log_file
+        root_logger.addHandler(file_handler)
+        logging.info(
+            f"Файловый логгер настроен. Логи будут записываться в: {log_file}")
 
     def get_logger(self, name: str = __name__) -> logging.Logger:
         """
@@ -81,8 +91,3 @@ class LogManager:
             logging.Logger: Экземпляр логгера.
         """
         return logging.getLogger(name)
-
-# --- Пример использования ---
-# logger_manager = LogManager("example.xlsx")
-# logger = logger_manager.get_logger(__name__)
-# logger.info("Это сообщение лога")

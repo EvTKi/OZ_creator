@@ -56,39 +56,53 @@ class WorkerThread(QThread):
 
     def run(self):
         try:
-            logger_manager = LogManager(self.excel_file_path)
+            # 1. Создаем логгер без привязки к входному файлу
+            logger_manager = LogManager()  # <-- Без файла
             logger = logger_manager.get_logger("WorkerThread")
-            logger.info("Начало обработки...")
 
+            # 2. !!! ПОЛУЧАЕМ base И НАСТРАИВАЕМ ФАЙЛОВЫЙ ЛОГГЕР РАНЬШЕ !!!
+            base = os.path.splitext(os.path.basename(self.excel_file_path))[0]
+            # Настройка файлового логгера с именем, основанным на выходном файле
+            logger_manager.setup_file_handler(base)  # <-- Вызываем здесь
+            # ---------------------------------------------------------------
+
+            # <-- Это сообщение теперь попадет и в файл
+            logger.info("Начало обработки...")
             self.progress.emit("Начало парсинга Excel-файла...")
+
             parser = ExcelParser(
                 self.excel_file_path, logger_manager,
                 override_sheet_categories=self.sheet_categories_name,
                 override_sheet_templates=self.sheet_templates_name
             )
+            # <-- Лог из xlsx_parser.py теперь тоже в файле
             structure = parser.build_structure()
             logger.info("Парсинг Excel-файла завершен.")
-
             self.progress.emit("Начало генерации CIM/XML...")
             generator = CIMXMLGenerator(
                 structure, self.parent_uid, logger_manager)
+            # <-- Лог из cim_xml_creator.py теперь тоже в файле
             xml_content = generator.create_xml()
             logger.info("Генерация CIM/XML завершена.")
 
-            base = os.path.splitext(os.path.basename(self.excel_file_path))[0]
+            # 3. Остальная часть (без дублирования setup_file_handler)
             out_xml_path = f'{base}.xml'
             if getattr(sys, 'frozen', False):
                 out_xml_path = os.path.join(
                     os.path.dirname(sys.executable), out_xml_path)
+
+            # Запись в файл
             with open(out_xml_path, 'w', encoding='utf-8') as f:
                 f.write(xml_content)
             logger.info(f"XML успешно сохранён: {out_xml_path}")
             self.finished.emit(out_xml_path)
         except Exception as e:
             error_msg = f"Ошибка во время выполнения: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            # logger.error(error_msg, exc_info=True) # exc_info=True для подробностей об ошибке
+            # Лучше использовать logger.exception внутри except блока:
+            # <-- Запишет traceback в файл тоже, если хендлер уже добавлен
+            logger.exception(error_msg)
             self.error.emit(error_msg)
-
 # --- 3. Главное окно приложения ---
 
 

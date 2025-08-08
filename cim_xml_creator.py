@@ -6,7 +6,7 @@
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from lxml import etree
+import lxml.etree as etree
 # Импортируем константы из нового config.py
 from config import (
     NSMAP, MODEL_CREATED_FORMAT, DEFAULT_STORAGE_DEPTH,
