@@ -53,8 +53,8 @@
 		"me": "http://monitel.com/2014/schema-cim16#"
 	},
 	"sheet_names": {
-		"categories": "",
-		"templates": ""
+		"categories": "Категории событий",
+		"templates": "Ключевые выражения"
 	},
 	"column_names": {
 		"category_type": "Тип категории",
