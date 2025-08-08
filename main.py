@@ -4,10 +4,10 @@
 """
 
 # Импортируем константы из нового config.py
-from config import DEBUG_FILE_NAME, DEBUG_PARENT_UID
-from logging_config import LogManager
-from xlsx_parser import ExcelParser
-from cim_xml_creator import CIMXMLGenerator
+from modules.config import DEBUG_FILE_NAME, DEBUG_PARENT_UID
+from modules.logging_config import LogManager
+from modules.xlsx_parser import ExcelParser
+from modules.cim_xml_creator import CIMXMLGenerator
 import os
 
 
